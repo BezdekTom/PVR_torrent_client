@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+serde = { version = "1.0.215", features = ["derive"] }
 http = "1.1.0"
-serde = "1.0.215"
 serde_urlencoded = "0.7.1"
 anyhow = "1.0.93"
 lava_torrent = "0.11.1"
 
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full"] }
 url = "2.4"
 rand = "0.8"
+urlencoding = "2.1"
+
+bytes = "1.0"
+hex = "0.4.3"
