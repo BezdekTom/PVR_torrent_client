@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
     eprintln!("Peer ID: {:?}", peer_id.to_string());
     let port: u16 = 6881;
 
-    let TrackerResponse { interval, peers } = discover_peers(&torrent_file, &peer_id, port)?;
+    let TrackerResponse { interval: _, peers } = discover_peers(&torrent_file, &peer_id, port)?;
 
     for (i, p) in peers.iter().enumerate() {
         println!("Pear: {}  address: {}", i + 1, p.addr)

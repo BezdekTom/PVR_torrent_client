@@ -1,4 +1,4 @@
-use anyhow::{Context, Error, Ok};
+use anyhow::{Error, Ok};
 use lava_torrent::torrent::v1::Torrent;
 use lava_torrent::tracker::Peer;
 use reqwest::Url;
@@ -76,7 +76,7 @@ fn discover_udp_peers(
     announce_req.extend_from_slice(&(1u32.to_be_bytes())); // Announce action
     announce_req.extend_from_slice(&transaction_id.to_be_bytes());
     announce_req.extend_from_slice(&torrent.info_hash_bytes());
-    announce_req.extend_from_slice(&peer_id.as_bytes());
+    announce_req.extend_from_slice(&peer_id.as_ref());
     announce_req.extend_from_slice(&0u64.to_be_bytes()); // downloaded
     announce_req.extend_from_slice(&(torrent.length as u64).to_be_bytes()); // left
     announce_req.extend_from_slice(&0u64.to_be_bytes()); // uploaded

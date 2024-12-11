@@ -45,12 +45,8 @@ impl AsRef<[u8]> for PeerId {
 }
 
 impl PeerId {
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
     pub fn to_vec(&self) -> Vec<u8> {
-        self.bytes.to_vec()
+        self.bytes.clone()
     }
 
     pub fn to_arr(&self) -> [u8; 20] {

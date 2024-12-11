@@ -95,11 +95,3 @@ fn urlencode(t: &Vec<u8>) -> String {
     }
     encoded
 }
-
-fn get_peers(torrent: Torrent) -> Vec<lava_torrent::tracker::Peer> {
-    if let Some(announce_list) = torrent.announce_list {
-        for announce in announce_list {}
-    }
-
-    todo!()
-}
