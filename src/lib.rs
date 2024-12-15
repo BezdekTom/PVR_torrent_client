@@ -1,7 +1,11 @@
-mod info_hash;
 pub mod peer_id;
 
-mod http_tracker;
-mod torrent_file;
+pub mod download;
+mod hash;
+mod piece;
+
+pub mod peer_comunication;
 pub mod tracker_connection;
-pub mod tracker_response;
+pub mod tui;
+
+mod writer;

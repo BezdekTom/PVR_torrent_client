@@ -1,12 +1,17 @@
+use std::fmt::Display;
+
 use rand::{thread_rng, Rng};
 
+/// Prefix defined by me for peer-id of peers using my torrent client
 const CLIENT_PREFIX: &[u8] = b"-PVR001-";
 
+/// Structure that represents peer-id, which is used as idetificator in torrent protocol comunication.
 pub struct PeerId {
     bytes: Vec<u8>,
 }
 
 impl PeerId {
+    /// Generates random peer-id with prefix `-PVR001-`, that is correct acording to bittorent protocol.
     pub fn generate() -> Self {
         let mut rng = thread_rng();
 
@@ -30,11 +35,9 @@ impl PeerId {
     }
 }
 
-impl ToString for PeerId {
-    fn to_string(&self) -> String {
-        // Converts bytes to a URL-safe percent-encoded string
-        // self.bytes.iter().map(|&b| format!("%{:02X}", b)).collect()
-        String::from_utf8(self.bytes.clone()).unwrap()
+impl Display for PeerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8(self.bytes.clone()).unwrap())
     }
 }
 
@@ -45,14 +48,12 @@ impl AsRef<[u8]> for PeerId {
 }
 
 impl PeerId {
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
+    /// Returns clone of iner bytes, represented as vectore.
     pub fn to_vec(&self) -> Vec<u8> {
-        self.bytes.to_vec()
+        self.bytes.clone()
     }
 
+    /// Returns iner bytes as array of length 20.
     pub fn to_arr(&self) -> [u8; 20] {
         let array: [u8; 20] = match self.bytes.clone().try_into() {
             Ok(arr) => arr,

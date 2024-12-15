@@ -1,10 +1,11 @@
+use crate::peer_id::PeerId;
+use crate::tracker_connection::tracker_response::TrackerResponse;
 use anyhow::Context;
 use lava_torrent::torrent::v1::Torrent;
 use lava_torrent::tracker::TrackerResponse as LavaTrackerResponse;
 use serde::Serialize;
 
-use crate::{peer_id::PeerId, tracker_response::TrackerResponse};
-
+/// Structure representing HTTP request to torrent tracker
 #[derive(Debug, Clone, Serialize)]
 pub struct HttpTrackerRequest {
     /// 20 character long string
@@ -29,6 +30,7 @@ pub struct HttpTrackerRequest {
 }
 
 impl HttpTrackerRequest {
+    /// Creates new HTTP request based on information from `torrent file`, given `peer id` and `port`.
     pub fn new(torrent: &Torrent, peer_id: &PeerId, port: u16) -> Self {
         HttpTrackerRequest {
             peer_id: peer_id.to_string(),
@@ -41,7 +43,8 @@ impl HttpTrackerRequest {
     }
 }
 
-fn tracker_request(
+/// Send request to torrent tracker and accept response
+async fn tracker_request(
     torrent: &Torrent,
     peer_id: &PeerId,
     port: u16,
@@ -58,11 +61,14 @@ fn tracker_request(
         url_params,
         &urlencode(&torrent.info_hash_bytes())
     );
-    eprintln!("Tracker url: {}", &tracker_url);
-    eprintln!("String info hash: {}", torrent.info_hash());
 
-    let response = reqwest::blocking::get(tracker_url).context("Sending get request")?;
-    let response = response.bytes().context("Getting bytes from response")?;
+    let response = reqwest::get(tracker_url)
+        .await
+        .context("Sending get request")?;
+    let response = response
+        .bytes()
+        .await
+        .context("Getting bytes from response")?;
 
     match LavaTrackerResponse::from_bytes(response) {
         Ok(response) => match response {
@@ -82,24 +88,23 @@ fn tracker_request(
 }
 
 impl TrackerResponse {
-    pub fn get_from_http(torrent: &Torrent, peer_id: &PeerId, port: u16) -> anyhow::Result<Self> {
-        tracker_request(torrent, peer_id, port)
+    /// Get tracker response from http torrent tracker
+    pub async fn get_from_http(
+        torrent: &Torrent,
+        peer_id: &PeerId,
+        port: u16,
+    ) -> anyhow::Result<Self> {
+        tracker_request(torrent, peer_id, port).await
     }
 }
 
+/// Function that encode byte array to string correctly for URL request.
+/// Neccesary for sending `info_hash`.
 fn urlencode(t: &Vec<u8>) -> String {
     let mut encoded = String::with_capacity(3 * t.len());
     for &byte in t {
         encoded.push('%');
-        encoded.push_str(&hex::encode(&[byte]));
+        encoded.push_str(&hex::encode([byte]));
     }
     encoded
-}
-
-fn get_peers(torrent: Torrent) -> Vec<lava_torrent::tracker::Peer> {
-    if let Some(announce_list) = torrent.announce_list {
-        for announce in announce_list {}
-    }
-
-    todo!()
 }
