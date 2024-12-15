@@ -1,42 +1,26 @@
-use lava_torrent::torrent::v1::Torrent;
-use std::collections::HashSet;
-
 use crate::hash::Hash;
-use crate::peer::PeerConnection;
+use lava_torrent::torrent::v1::Torrent;
 
-#[derive(Debug, PartialEq, Eq)]
+/// Structure representing data of one downloaded piece of downloaded file.
+/// Contains `piece index` and `piece data`.
+#[derive(Debug, Clone)]
+pub struct PieceData {
+    pub piece_idx: usize,
+    pub data: Vec<u8>,
+}
+
+/// Structure representing information necessary for downloading one piece from peer.
+/// Containd `piece index`, `piece length` and `piece data hash`.
+#[derive(Debug, Clone)]
 pub struct Piece {
-    peers: HashSet<usize>,
     piece_idx: usize,
     length: usize,
     hash: [u8; 20],
 }
 
-impl Ord for Piece {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.peers
-            .len()
-            .cmp(&other.peers.len())
-            // tie-break by _random_ ordering of HashSet to avoid deterministic contention
-            .then(self.peers.iter().cmp(other.peers.iter()))
-            .then(self.hash.cmp(&other.hash))
-            .then(self.length.cmp(&other.length))
-            .then(self.piece_idx.cmp(&other.piece_idx))
-    }
-}
-
-impl PartialOrd for Piece {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Piece {
-    pub(crate) fn new(
-        piece_idx: usize,
-        torrent: &Torrent,
-        peers: &[PeerConnection],
-    ) -> anyhow::Result<Self> {
+    /// Create new `Piece`, based on `piece index` and informatins from `torrent file`.
+    pub(crate) fn new(piece_idx: usize, torrent: &Torrent) -> anyhow::Result<Self> {
         let piece_hash = torrent.pieces[piece_idx].clone();
         let piece_size = if piece_idx == torrent.pieces.len() - 1 {
             let md = torrent.length % torrent.piece_length;
@@ -49,33 +33,37 @@ impl Piece {
             torrent.piece_length
         };
 
-        let peers = peers
-            .iter()
-            .enumerate()
-            .filter_map(|(peer_i, peer)| peer.has_piece(piece_idx).then_some(peer_i))
-            .collect();
-
         Ok(Self {
-            peers,
+            // peers,
             piece_idx,
             length: piece_size as usize,
             hash: Hash::new(piece_hash)?.to_arr(),
         })
     }
 
-    pub(crate) fn peers(&self) -> &HashSet<usize> {
-        &self.peers
-    }
-
+    /// Returns `piece index`.
     pub(crate) fn index(&self) -> usize {
         self.piece_idx
     }
 
+    /// Returns hash of piece data.
+    #[allow(dead_code)]
     pub(crate) fn hash(&self) -> [u8; 20] {
         self.hash
     }
 
+    /// Returns `piece length` in bytes.
     pub(crate) fn length(&self) -> usize {
         self.length
     }
+}
+
+/// Returns information about all pieces that should be downloaded, based on `torrent file`.
+pub fn pieces_from_torrent(torrent: &Torrent) -> anyhow::Result<Vec<Piece>> {
+    let mut pieces = Vec::new();
+    for i in 0..torrent.pieces.len() {
+        pieces.push(Piece::new(i, torrent)?);
+    }
+
+    Ok(pieces)
 }

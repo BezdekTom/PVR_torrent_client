@@ -1,10 +1,11 @@
 pub mod peer_id;
 
-mod http_tracker;
-pub mod tracker_connection;
-pub mod tracker_response;
-
-mod download;
+pub mod download;
 mod hash;
-mod peer;
 mod piece;
+
+pub mod peer_comunication;
+pub mod tracker_connection;
+pub mod tui;
+
+mod writer;

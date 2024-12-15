@@ -1,103 +1,142 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
+use lava_torrent::torrent::v1::Torrent;
 use lava_torrent::tracker::Peer;
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, RwLock};
-use tokio::task;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{mpsc, Mutex};
+use tokio::task::{self, JoinHandle};
+use tokio::time::timeout;
 
-use crate::peer::PeerConnection;
+use crate::hash::Hash;
+use crate::peer_comunication::peer_connection::{downloading_pieces_from_pear, TIMEOUT};
 use crate::peer_id::PeerId;
+use crate::piece::{pieces_from_torrent, Piece, PieceData};
+use crate::writer::PieceFileWriter;
 
-struct TorrentDownloader {
+/// Structure that represents downloading torrent file from peers, and its saving to file
+pub struct TorrentDownloader {
     info_hash: [u8; 20],
     total_pieces: usize,
-    piece_length: usize,
-    pieces_downloaded: Arc<RwLock<HashSet<usize>>>,
-    pieces_data: Arc<RwLock<HashMap<usize, Vec<u8>>>>,
+    torrent: Torrent,
+    piece_pool: Arc<Mutex<HashMap<usize, Piece>>>,
+    download_count: Arc<AtomicUsize>,
 }
 
 impl TorrentDownloader {
+    /// Create a new torrent downloader based on given torrent file
+    pub fn new(torrent: Torrent) -> Result<Self> {
+        let piece_pool = pieces_from_torrent(&torrent)?
+            .into_iter()
+            .enumerate()
+            .collect();
+        Ok(TorrentDownloader {
+            info_hash: Hash::new(torrent.info_hash_bytes())?.to_arr(),
+            total_pieces: torrent.pieces.len(),
+            torrent,
+            piece_pool: Arc::new(Mutex::new(piece_pool)),
+            download_count: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    /// Download a file from peers, and save it to given folder.
+    /// Given PeerId is used to comunicate with other peers.
+    /// Download sender is used to accept indexes of already downloaded pieces.
+    pub async fn download_torrent(
+        &self,
+        peers: Vec<Peer>,
+        peer_id: &PeerId,
+        folder_path: String,
+        downloaded_sender: Sender<usize>,
+    ) -> Result<()> {
+        let (connection_tasks, receiver) = self.make_peers_connections(peers, peer_id).await?;
+
+        let writer_handle = self
+            .init_writer(folder_path, receiver, downloaded_sender)
+            .await?;
+
+        // Wait for writer to finish
+        writer_handle.await??;
+
+        // Wait for all pieces to download
+        for task in connection_tasks {
+            task.abort();
+            let _ = task.await;
+        }
+
+        Ok(())
+    }
+
+    /// Do TCP connection to given peers, and start bittorent protocol with them.
     async fn make_peers_connections(
         &self,
         peers: Vec<Peer>,
         peer_id: &PeerId,
-    ) -> Result<Vec<PeerConnection>> {
+    ) -> Result<(Vec<JoinHandle<Result<()>>>, Receiver<PieceData>)> {
         // Establish connections to peers concurrently
+        let (sender, receiver) = mpsc::channel(1024);
         let connection_tasks: Vec<_> = peers
             .into_iter()
             .map(|peer| {
                 let info_hash = self.info_hash;
                 let peer_id_arr = peer_id.to_arr();
+                let sender_clone = sender.clone();
+                let piece_count = self.torrent.pieces.len();
+                let piece_pool = self.piece_pool.clone();
+                let downloaded_count = self.download_count.clone();
 
                 task::spawn(async move {
-                    match TcpStream::connect(&peer.addr).await {
-                        Ok(stream) => {
-                            let mut peer_conn = PeerConnection::new(stream, peer_id_arr);
-
-                            if let Err(_) = peer_conn.handshake(&info_hash).await {
-                                return None;
-                            }
-
-                            Some(peer_conn)
+                    match timeout(TIMEOUT, TcpStream::connect(&peer.addr)).await {
+                        Ok(Ok(stream)) => {
+                            downloading_pieces_from_pear(
+                                stream,
+                                info_hash,
+                                peer_id_arr,
+                                piece_count,
+                                sender_clone,
+                                piece_pool,
+                                downloaded_count,
+                            )
+                            .await
                         }
-                        Err(_) => None,
+                        _ => anyhow::bail!("Unable to open tcp connection"),
                     }
                 })
             })
             .collect();
 
-        // Collect successful connections
-        let mut active_connections = Vec::new();
-        for task in connection_tasks {
-            if let Ok(Some(connection)) = task.await {
-                active_connections.push(connection);
-            }
-        }
-        Ok(active_connections)
+        Ok((connection_tasks, receiver))
     }
 
-    async fn download_torrent(&self, peers: Vec<Peer>, peer_id: &PeerId) -> Result<()> {
-        let connections = Arc::new(Mutex::new(
-            self.make_peers_connections(peers, peer_id).await?,
-        ));
+    /// Init writer in new tokio task.
+    /// This writer will save already downloaded pieces to final file.
+    async fn init_writer(
+        &self,
+        folder_path: String,
+        piece_channel: Receiver<PieceData>,
+        downloaded_sender: Sender<usize>,
+    ) -> Result<JoinHandle<Result<()>>> {
+        let file_path = PathBuf::from(folder_path).join(&self.torrent.name);
+        let total_pieces = self.total_pieces;
+        let piece_length = self.torrent.piece_length as usize;
+        let file_size = self.torrent.length as u64;
+        let handle = task::spawn(async move {
+            let piece_writer = PieceFileWriter::new(
+                file_path,
+                total_pieces,
+                piece_length,
+                file_size,
+                piece_channel,
+                downloaded_sender,
+            )
+            .await;
+            piece_writer?.write_file().await
+        });
 
-        // Download pieces concurrently
-        let download_tasks: Vec<_> = (0..self.total_pieces)
-            .map(|piece_index| {
-                let connections = Arc::clone(&connections);
-                let piece_downloaded = Arc::clone(&self.pieces_downloaded);
-                let piece_data = Arc::clone(&self.pieces_data);
-
-                task::spawn(async move {
-                    // Find a peer with the piece
-                    for conn in connections.lock().await.iter_mut() {
-                        if conn.bitfield[piece_index] {
-                            match conn.download_piece(piece_index).await {
-                                Ok(downloaded_piece_data) => {
-                                    piece_downloaded.write().await.insert(piece_index);
-
-                                    piece_data
-                                        .write()
-                                        .await
-                                        .insert(piece_index, downloaded_piece_data);
-                                    return Ok(());
-                                }
-                                Err(_) => continue,
-                            }
-                        }
-                    }
-                    anyhow::bail!("No peer has piece {}", piece_index)
-                })
-            })
-            .collect();
-
-        // Wait for all pieces to download
-        for task in download_tasks {
-            task.await??;
-        }
-
-        Ok(())
+        Ok(handle)
     }
 }
